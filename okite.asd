@@ -1,6 +1,6 @@
 (defsystem "okite"
   :version "0.1.0"
-  :description "Rules for what the files of a package-inferred system may depend on"
+  :description "Enforce layered dependencies in package-inferred systems, and find generic functions nothing implements"
   :long-description #.(uiop:read-file-string
                        (uiop:subpathname *load-pathname* "README.md"))
   :author "Akira Tempaku"
