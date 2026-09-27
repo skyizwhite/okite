@@ -27,6 +27,7 @@
   (layers '())     ; ((layer pattern ...) ...)
   (allow '())      ; ((layer layer ...) ...)
   (libraries '())  ; (("name" layer ...) ...)
+  (anywhere '())   ; ("name" ...)
   (forbid '())     ; ("name" ...)
   (ignore '()))    ; (pattern ...)
 
@@ -44,7 +45,15 @@
           (:system (setf (definition-system definition) (string-downcase (string (first body)))))
           (:layers (setf (definition-layers definition) body))
           (:allow (setf (definition-allow definition) body))
-          (:libraries (setf (definition-libraries definition) body))
+          (:libraries (setf (definition-libraries definition)
+                            (mapcar (lambda (entry)
+                                      (if (and (consp entry) (stringp (first entry)))
+                                          (cons (string-downcase (first entry)) (rest entry))
+                                          entry))
+                                    body)))
+          (:anywhere (setf (definition-anywhere definition)
+                           (mapcar (lambda (name) (if (stringp name) (string-downcase name) name))
+                                   body)))
           (:forbid (setf (definition-forbid definition) (mapcar #'string-downcase body)))
           (:ignore (setf (definition-ignore definition) body))
           (t (definition-error name "unknown clause ~s" key)))))
@@ -79,10 +88,24 @@
             :when (assoc (first entry) more)
               :do (definition-error name "~s is given twice in :allow" (first entry)))
       (dolist (entry (definition-libraries definition))
-        (unless (stringp (first entry))
+        (unless (and (consp entry) (stringp (first entry)))
           (definition-error name "~s in :libraries does not start with a library's name" entry))
+        (unless (rest entry)
+          (definition-error name "~s in :libraries gives no layer; a library no layer may use is for :forbid"
+                            (first entry)))
         (dolist (layer (rest entry))
-          (known layer :libraries))))))
+          (known layer :libraries)))
+      (dolist (library (definition-anywhere definition))
+        (unless (stringp library)
+          (definition-error name "~s in :anywhere is not a library's name" library)))
+      (loop :for (library . more) :on (library-names definition)
+            :when (member library more :test #'string=)
+              :do (definition-error name "the library ~s is listed twice" library)))))
+
+(defun library-names (definition)
+  "The names :libraries and :anywhere list, in that order."
+  (append (mapcar #'first (definition-libraries definition))
+          (definition-anywhere definition)))
 
 (defun pattern-p (pattern)
   (and (stringp pattern) (plusp (length pattern))))
@@ -105,7 +128,10 @@
                           a system outside this one and the layers that may use
                           it. The name covers its subsystems and extensions:
                           \"lack\" covers lack/request and lack-middleware-session.
-                          A library not listed may be used anywhere.
+  (:anywhere \"name\" ...)  libraries every layer may use, named as in :libraries.
+                          A library none of :libraries, :anywhere and :forbid
+                          names is a violation, and so is a name in :libraries
+                          or :anywhere that covers nothing a file uses.
   (:forbid \"name\" ...)    systems no file may use, with their subsystems.
   (:ignore pattern ...)   files under the system's :pathname that are not part
                           of it, as patterns like those of :layers. Directories
@@ -194,14 +220,17 @@ nickname it after."
            (member (char dependency (length name)) separators))))
 
 (defun library-layers (definition dependency)
-  "The layers that may use DEPENDENCY, and whether :libraries lists it at all.
-The longest name that covers it wins, as the longest pattern does in :layers."
+  "The layers that may use DEPENDENCY, :anywhere, or NIL when neither :libraries
+nor :anywhere lists it. The longest name that covers it wins, as the longest
+pattern does in :layers."
   (let ((best nil))
-    (dolist (entry (definition-libraries definition))
+    (dolist (entry (append (definition-libraries definition)
+                           (mapcar (lambda (name) (cons name :anywhere))
+                                   (definition-anywhere definition))))
       (when (and (covers-p (first entry) dependency '(#\/ #\-))
                  (or (null best) (> (length (first entry)) (length (first best)))))
         (setf best entry)))
-    (values (rest best) (and best t))))
+    (rest best)))
 
 (defun forbidden-p (definition dependency)
   (some (lambda (name) (covers-p name dependency '(#\/)))
@@ -210,8 +239,10 @@ The longest name that covers it wins, as the longest pattern does in :layers."
 (defstruct (violation (:constructor make-violation
                           (kind file layer &optional dependency dependency-layer)))
   "KIND is :unplaced (FILE is in no layer), :layer (DEPENDENCY is in a layer
-LAYER may not use), :library (DEPENDENCY is a library LAYER may not use) or
-:forbidden (DEPENDENCY is forbidden everywhere)."
+LAYER may not use), :library (DEPENDENCY is a library LAYER may not use),
+:forbidden (DEPENDENCY is forbidden everywhere), :unlisted (DEPENDENCY is a
+library nothing lists) or :unused (DEPENDENCY is a name in :libraries or
+:anywhere that covers nothing a file uses; FILE and LAYER are NIL)."
   kind file layer dependency dependency-layer)
 
 (defun describe-violation (violation stream)
@@ -224,7 +255,9 @@ LAYER may not use), :library (DEPENDENCY is a library LAYER may not use) or
                       file layer dependency (violation-dependency-layer violation)))
       (:library (format stream "~a (~(~a~)) uses ~a, which is for ~{~(~a~)~^, ~}"
                         file layer dependency (violation-dependency-layer violation)))
-      (:forbidden (format stream "~a uses ~a, which is forbidden" file dependency)))))
+      (:forbidden (format stream "~a uses ~a, which is forbidden" file dependency))
+      (:unlisted (format stream "~a (~(~a~)) uses ~a, which is not listed" file layer dependency))
+      (:unused (format stream "~s covers nothing a file uses" dependency)))))
 
 (defmethod print-object ((violation violation) stream)
   (if *print-escape*
@@ -237,13 +270,20 @@ LAYER may not use), :library (DEPENDENCY is a library LAYER may not use) or
 system as ASDF sees them now. Files are named as ASDF systems."
   (let* ((definition (ensure-definition layers))
          (system (definition-system definition))
+         (libraries '())
          (found '()))
     (dolist (file (remove-if (lambda (file) (ignored-p definition file))
                              (system-files system)))
       (let ((name (format nil "~a/~a" system file))
             (layer (layer-of definition file)))
         (if (null layer)
-            (push (make-violation :unplaced name nil) found)
+            (progn
+              (push (make-violation :unplaced name nil) found)
+              ;; what it uses still counts, or its libraries are reported unused too;
+              ;; a file that does not start with a defpackage has nothing ASDF can read
+              (dolist (dependency (ignore-errors (file-dependencies system file)))
+                (unless (internal-file definition dependency)
+                  (push dependency libraries))))
             (dolist (dependency (file-dependencies system file))
               (let ((internal (internal-file definition dependency)))
                 (if internal
@@ -253,11 +293,19 @@ system as ASDF sees them now. Files are named as ASDF systems."
                                  (not (eq to layer))
                                  (not (member to (rest (assoc layer (definition-allow definition))))))
                         (push (make-violation :layer name layer dependency to) found)))
-                    (multiple-value-bind (homes listed) (library-layers definition dependency)
-                      (when (forbidden-p definition dependency)
-                        (push (make-violation :forbidden name layer dependency) found))
-                      (when (and listed (not (member layer homes)))
-                        (push (make-violation :library name layer dependency homes) found)))))))))
+                    (let ((homes (library-layers definition dependency))
+                          (forbidden (forbidden-p definition dependency)))
+                      (push dependency libraries)
+                      (cond (forbidden
+                             (push (make-violation :forbidden name layer dependency) found))
+                            ((null homes)
+                             (push (make-violation :unlisted name layer dependency) found))
+                            ((and (listp homes) (not (member layer homes)))
+                             (push (make-violation :library name layer dependency homes) found))))))))))
+    ;; :forbid is left out: a forbidden name that covers nothing is what it is for
+    (dolist (library (library-names definition))
+      (unless (some (lambda (dependency) (covers-p library dependency '(#\/ #\-))) libraries)
+        (push (make-violation :unused nil nil library) found)))
     (nreverse found)))
 
 (define-condition violation-error (error)

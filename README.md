@@ -28,8 +28,9 @@ loaded.
           (:infra    :domain :usecases)
           (:web      :domain :usecases)
           (:main     :domain :usecases :infra :web))
-  (:libraries ("dbi" :infra)
+  (:libraries ("cl-dbi" :infra)
               ("clack" :web :main))
+  (:anywhere "alexandria")
   (:forbid "my-app-client"))
 ```
 
@@ -42,9 +43,17 @@ is not the same: two definitions for one system, or a name of your own choosing.
 | `(:system "name")` | The system whose files are checked, when it is not the name downcased. |
 | `(:layers (layer pattern ...) ...)` | Where each file belongs. A pattern ending in `/` covers every file under that directory, any other pattern the one file; both are relative to the system's `:pathname`, without `.lisp`. The longest pattern that matches a file wins, so `"usecases/ports/"` can be a layer of its own inside `"usecases/"`. A file no pattern matches is a violation. |
 | `(:allow (layer layer ...) ...)` | What the first layer may depend on besides itself. Anything else is a violation. |
-| `(:libraries ("name" layer ...) ...)` | A system outside this one and the layers that may use it. The name covers its subsystems and extensions: `"lack"` covers `lack/request` and `lack-middleware-session`. When more than one name covers a dependency, the longest wins. A library not listed may be used anywhere. |
+| `(:libraries ("name" layer ...) ...)` | A system outside this one and the layers that may use it. The name covers its subsystems and extensions: `"lack"` covers `lack/request` and `lack-middleware-session`. When more than one name covers a dependency, the longest wins. At least one layer is given: a library no layer may use is for `:forbid`. |
+| `(:anywhere "name" ...)` | Libraries every layer may use, named as in `:libraries`. |
 | `(:forbid "name" ...)` | Systems no file may use, with their subsystems. |
 | `(:ignore pattern ...)` | Files under the system's `:pathname` that are not part of it — scripts, fixtures — as patterns like those of `:layers`. Directories whose name starts with a dot (`.qlot`, `.git`) are never looked in. |
+
+Every library a file uses must be listed: in `:libraries`, in `:anywhere` or in
+`:forbid`. One that is not is a violation, so a library is never allowed by being
+forgotten, and neither is one whose name is misspelled — `"dbi"` covers nothing
+when the system is `cl-dbi`. A name in `:libraries` or `:anywhere` that covers
+nothing a file uses is a violation too; a name in `:forbid` is not, since
+covering nothing is what it is there for.
 
 A dependency on the system itself (a file that imports `my-app`) counts as one
 on its `main` file, which package-inferred systems conventionally nickname after
@@ -60,7 +69,7 @@ them.
 ```
 
 A violation prints as a sentence with `princ`, and its kind (`:unplaced`,
-`:layer`, `:library` or `:forbidden`), file, layer, dependency and the
+`:layer`, `:library`, `:forbidden`, `:unlisted` or `:unused`), file, layer, dependency and the
 dependency's layer are readable with `violation-kind` and the other readers. In a
 test, with [rove](https://github.com/fukamachi/rove):
 

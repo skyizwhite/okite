@@ -18,7 +18,7 @@
 ;;;   domain/entity, domain/rule -> domain/entity
 ;;;   usecases/create -> domain/entity, somelib
 ;;;   infra/store     -> domain/entity, usecases/create
-;;;   web/page        -> usecases/create, somelib
+;;;   web/page        -> usecases/create, somelib/extra
 ;;;   main            -> infra/store, web/page
 ;;; and two files that are not part of it: scripts/run, which does not start
 ;;; with a defpackage, and .hidden/junk, in a directory okite never walks.
@@ -67,13 +67,13 @@
   (ok (equal (summary (layer-violations 'strict))
              '((:layer "okite-fixture/infra/store" :infra
                 "okite-fixture/usecases/create" :usecases)
-               (:library "okite-fixture/web/page" :web "somelib" (:usecases))))
+               (:library "okite-fixture/web/page" :web "somelib/extra" (:usecases))))
       "a layer outside :allow and a library outside its layers are reported, in file order"))
 
 (deftest a-violation-reads-as-a-sentence
   (ok (equal (mapcar #'princ-to-string (layer-violations 'strict))
              '("okite-fixture/infra/store (infra) uses okite-fixture/usecases/create (usecases)"
-               "okite-fixture/web/page (web) uses somelib, which is for usecases"))))
+               "okite-fixture/web/page (web) uses somelib/extra, which is for usecases"))))
 
 (define-layers without-web
   (:system "okite-fixture")
@@ -84,7 +84,8 @@
            (:main "main"))
   (:allow (:usecases :domain)
           (:infra :domain :usecases)
-          (:main :infra)))
+          (:main :infra))
+  (:anywhere "somelib"))
 
 (deftest a-file-in-no-layer
   (ok (equal (summary (layer-violations 'without-web))
@@ -121,7 +122,8 @@
   (:allow (:usecases :entities)
           (:infra :entities :usecases)
           (:web :usecases)
-          (:main :infra :web)))
+          (:main :infra :web))
+  (:anywhere "somelib"))
 
 (deftest the-longest-pattern-wins
   (ok (equal (summary (layer-violations 'longest-wins))
@@ -155,18 +157,119 @@
           (:infra :domain :usecases)
           (:web :usecases)
           (:main :infra :web))
-  (:libraries ("some" :usecases :web)
-              ("somelib" :usecases)))
+  (:libraries ("somelib" :usecases :web)
+              ("somelib/extra" :usecases)))
 
 (deftest the-longest-library-name-wins
   (ok (equal (summary (layer-violations 'longest-library-wins))
-             '((:library "okite-fixture/web/page" :web "somelib" (:usecases))))
-      "\"somelib\" decides, though \"some\" covers it too and comes first"))
+             '((:library "okite-fixture/web/page" :web "somelib/extra" (:usecases))))
+      "\"somelib/extra\" decides, though \"somelib\" covers it too and comes first"))
 
 (deftest forbidden-systems
   (ok (equal (summary (layer-violations 'no-somelib))
              '((:forbidden "okite-fixture/usecases/create" :usecases "somelib" nil)
-               (:forbidden "okite-fixture/web/page" :web "somelib" nil)))))
+               (:forbidden "okite-fixture/web/page" :web "somelib/extra" nil)))))
+
+(define-layers somelib-anywhere
+  (:system "okite-fixture")
+  (:ignore "scripts/")
+  (:layers (:domain "domain/")
+           (:usecases "usecases/")
+           (:infra "infra/")
+           (:web "web/")
+           (:main "main"))
+  (:allow (:usecases :domain)
+          (:infra :domain :usecases)
+          (:web :usecases)
+          (:main :infra :web))
+  (:anywhere "somelib"))
+
+(deftest a-library-anywhere
+  (ok (null (layer-violations 'somelib-anywhere)) "every layer may use it"))
+
+(define-layers somelib-unlisted
+  (:system "okite-fixture")
+  (:ignore "scripts/")
+  (:layers (:domain "domain/")
+           (:usecases "usecases/")
+           (:infra "infra/")
+           (:web "web/")
+           (:main "main"))
+  (:allow (:usecases :domain)
+          (:infra :domain :usecases)
+          (:web :usecases)
+          (:main :infra :web))
+  (:libraries ("some" :usecases :web)))
+
+(deftest an-unlisted-library
+  (ok (equal (summary (layer-violations 'somelib-unlisted))
+             '((:unlisted "okite-fixture/usecases/create" :usecases "somelib" nil)
+               (:unlisted "okite-fixture/web/page" :web "somelib/extra" nil)
+               (:unused nil nil "some" nil)))
+      "a library nothing lists is reported where it is used, and so is a name that covers nothing")
+  (ok (equal (mapcar #'princ-to-string (layer-violations 'somelib-unlisted))
+             '("okite-fixture/usecases/create (usecases) uses somelib, which is not listed"
+               "okite-fixture/web/page (web) uses somelib/extra, which is not listed"
+               "\"some\" covers nothing a file uses"))))
+
+(define-layers unused-names
+  (:system "okite-fixture")
+  (:ignore "scripts/")
+  (:layers (:domain "domain/")
+           (:usecases "usecases/")
+           (:infra "infra/")
+           (:web "web/")
+           (:main "main"))
+  (:allow (:usecases :domain)
+          (:infra :domain :usecases)
+          (:web :usecases)
+          (:main :infra :web))
+  (:libraries ("somelib" :usecases :web) ("otherlib" :infra))
+  (:anywhere "thirdlib")
+  (:forbid "forbiddenlib"))
+
+(deftest names-that-cover-nothing
+  (ok (equal (summary (layer-violations 'unused-names))
+             '((:unused nil nil "otherlib" nil)
+               (:unused nil nil "thirdlib" nil)))
+      "in :libraries and :anywhere, but not in :forbid"))
+
+(define-layers web-unplaced-with-its-library
+  (:system "okite-fixture")
+  (:ignore "scripts/")
+  (:layers (:domain "domain/")
+           (:usecases "usecases/")
+           (:infra "infra/")
+           (:main "main"))
+  (:allow (:usecases :domain)
+          (:infra :domain :usecases)
+          (:main :infra))
+  (:libraries ("somelib" :usecases)
+              ("somelib/extra" :usecases)))
+
+(deftest a-file-in-no-layer-still-uses-its-libraries
+  (ok (equal (summary (layer-violations 'web-unplaced-with-its-library))
+             '((:unplaced "okite-fixture/web/page" nil nil nil)))
+      "somelib/extra, which only web/page uses, is not reported unused"))
+
+(define-layers names-in-capitals
+  (:system "okite-fixture")
+  (:ignore "scripts/")
+  (:layers (:domain "domain/")
+           (:usecases "usecases/")
+           (:infra "infra/")
+           (:web "web/")
+           (:main "main"))
+  (:allow (:usecases :domain)
+          (:infra :domain :usecases)
+          (:web :usecases)
+          (:main :infra :web))
+  (:libraries ("SomeLib" :usecases :web))
+  (:anywhere "SomeLib/Extra"))
+
+(deftest names-are-read-downcased
+  (ok (null (layer-violations 'names-in-capitals))
+      "as the systems ASDF names are"))
 
 (deftest ensure-layers-signals
   (ok (null (ensure-layers 'lenient)))
@@ -205,4 +308,13 @@
     (ok (signals (make '(:system "x") '(:layers (:a "a/") (:b "b/")) '(:allow (:a :b) (:a :a))))
         "a layer given twice in :allow")
     (ok (signals (make '(:system "x") '(:layers (:a "")))) "an empty pattern")
-    (ok (signals (make '(:system "x") '(:layers (:a "a/")) '(:ignore ""))) "an empty pattern in :ignore")))
+    (ok (signals (make '(:system "x") '(:layers (:a "a/")) '(:ignore ""))) "an empty pattern in :ignore")
+    (ok (signals (make '(:system "x") '(:layers (:a "a/")) '(:anywhere :lib))) "a name in :anywhere that is not a string")
+    (ok (signals (make '(:system "x") '(:layers (:a "a/")) '(:libraries ("lib" :a)) '(:anywhere "lib")))
+        "a library in :libraries and :anywhere")
+    (ok (signals (make '(:system "x") '(:layers (:a "a/")) '(:libraries ("lib" :a) ("lib" :a))))
+        "a library twice in :libraries")
+    (ok (signals (make '(:system "x") '(:layers (:a "a/")) '(:libraries ("lib"))))
+        "a library no layer is given")
+    (ok (signals (make '(:system "x") '(:layers (:a "a/")) '(:libraries ("lib" :a)) '(:anywhere "LIB")))
+        "a library in :libraries and :anywhere, whatever its case")))
