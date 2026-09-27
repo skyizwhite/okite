@@ -26,6 +26,7 @@
   system
   (layers '())     ; ((layer pattern ...) ...)
   (allow '())      ; ((layer layer ...) ...)
+  (isolated '())   ; (layer ...)
   (libraries '())  ; (("name" layer ...) ...)
   (anywhere '())   ; ("name" ...)
   (forbid '())     ; ("name" ...)
@@ -45,6 +46,7 @@
           (:system (setf (definition-system definition) (string-downcase (string (first body)))))
           (:layers (setf (definition-layers definition) body))
           (:allow (setf (definition-allow definition) body))
+          (:isolated (setf (definition-isolated definition) body))
           (:libraries (setf (definition-libraries definition)
                             (mapcar (lambda (entry)
                                       (if (and (consp entry) (stringp (first entry)))
@@ -87,6 +89,15 @@
       (loop :for (entry . more) :on (definition-allow definition)
             :when (assoc (first entry) more)
               :do (definition-error name "~s is given twice in :allow" (first entry)))
+      (dolist (entry (definition-allow definition))
+        (when (member (first entry) (rest entry))
+          (definition-error name "~s is allowed itself in :allow; a layer may use itself unless it is :isolated"
+                            (first entry))))
+      (dolist (layer (definition-isolated definition))
+        (known layer :isolated))
+      (loop :for (layer . more) :on (definition-isolated definition)
+            :when (member layer more)
+              :do (definition-error name "~s is given twice in :isolated" layer))
       (dolist (entry (definition-libraries definition))
         (unless (and (consp entry) (stringp (first entry)))
           (definition-error name "~s in :libraries does not start with a library's name" entry))
@@ -124,6 +135,7 @@
   (:allow (layer layer ...) ...)
                           what the first layer may depend on besides itself.
                           Anything not listed is a violation.
+  (:isolated layer ...)   layers whose files may not use one another.
   (:libraries (\"name\" layer ...) ...)
                           a system outside this one and the layers that may use
                           it. The name covers its subsystems and extensions:
@@ -239,8 +251,8 @@ pattern does in :layers."
 (defstruct (violation (:constructor make-violation
                           (kind file layer &optional dependency dependency-layer)))
   "KIND is :unplaced (FILE is in no layer), :layer (DEPENDENCY is in a layer
-LAYER may not use), :library (DEPENDENCY is a library LAYER may not use),
-:forbidden (DEPENDENCY is forbidden everywhere), :unlisted (DEPENDENCY is a
+LAYER may not use, LAYER itself when it is isolated), :library (DEPENDENCY is a
+library LAYER may not use), :forbidden (DEPENDENCY is forbidden everywhere), :unlisted (DEPENDENCY is a
 library nothing lists) or :unused (DEPENDENCY is a name in :libraries or
 :anywhere that covers nothing a file uses; FILE and LAYER are NIL)."
   kind file layer dependency dependency-layer)
@@ -290,8 +302,9 @@ system as ASDF sees them now. Files are named as ASDF systems."
                     (let ((to (layer-of definition internal)))
                       ;; a file in no layer is reported once, as itself
                       (when (and to
-                                 (not (eq to layer))
-                                 (not (member to (rest (assoc layer (definition-allow definition))))))
+                                 (if (eq to layer)
+                                     (member layer (definition-isolated definition))
+                                     (not (member to (rest (assoc layer (definition-allow definition)))))))
                         (push (make-violation :layer name layer dependency to) found)))
                     (let ((homes (library-layers definition dependency))
                           (forbidden (forbidden-p definition dependency)))

@@ -43,6 +43,7 @@ is not the same: two definitions for one system, or a name of your own choosing.
 | `(:system "name")` | The system whose files are checked, when it is not the name downcased. |
 | `(:layers (layer pattern ...) ...)` | Where each file belongs. A pattern ending in `/` covers every file under that directory, any other pattern the one file; both are relative to the system's `:pathname`, without `.lisp`. The longest pattern that matches a file wins, so `"usecases/ports/"` can be a layer of its own inside `"usecases/"`. A file no pattern matches is a violation. |
 | `(:allow (layer layer ...) ...)` | What the first layer may depend on besides itself. Anything else is a violation. |
+| `(:isolated layer ...)` | Layers whose files may not depend on one another. A layer of its own inside one, like `"usecases/ports/"` inside `"usecases/"`, is not part of it: what they may use of each other is for `:allow`. |
 | `(:libraries ("name" layer ...) ...)` | A system outside this one and the layers that may use it. The name covers its subsystems and extensions: `"lack"` covers `lack/request` and `lack-middleware-session`. When more than one name covers a dependency, the longest wins. At least one layer is given: a library no layer may use is for `:forbid`. |
 | `(:anywhere "name" ...)` | Libraries every layer may use, named as in `:libraries`. |
 | `(:forbid "name" ...)` | Systems no file may use, with their subsystems. |

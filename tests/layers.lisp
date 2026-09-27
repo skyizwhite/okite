@@ -75,6 +75,29 @@
              '("okite-fixture/infra/store (infra) uses okite-fixture/usecases/create (usecases)"
                "okite-fixture/web/page (web) uses somelib/extra, which is for usecases"))))
 
+(define-layers domain-isolated
+  (:system "okite-fixture")
+  (:ignore "scripts/")
+  (:layers (:domain "domain/")
+           (:usecases "usecases/")
+           (:infra "infra/")
+           (:web "web/")
+           (:main "main"))
+  (:allow (:usecases :domain)
+          (:infra :domain :usecases)
+          (:web :usecases)
+          (:main :infra :web))
+  (:isolated :domain :usecases)
+  (:libraries ("somelib" :usecases :web)))
+
+(deftest an-isolated-layer
+  (ok (equal (summary (layer-violations 'domain-isolated))
+             '((:layer "okite-fixture/domain/rule" :domain
+                "okite-fixture/domain/entity" :domain)))
+      "a file of an isolated layer may not use another file of it, and may use what :allow lets it")
+  (ok (equal (mapcar #'princ-to-string (layer-violations 'domain-isolated))
+             '("okite-fixture/domain/rule (domain) uses okite-fixture/domain/entity (domain)"))))
+
 (define-layers without-web
   (:system "okite-fixture")
   (:ignore "scripts/")
@@ -307,6 +330,10 @@
     (ok (signals (make '(:system "x") '(:layers (:a "a/")) '(:alow (:a)))) "an unknown clause")
     (ok (signals (make '(:system "x") '(:layers (:a "a/") (:b "b/")) '(:allow (:a :b) (:a :a))))
         "a layer given twice in :allow")
+    (ok (signals (make '(:system "x") '(:layers (:a "a/") (:b "b/")) '(:allow (:a :b :a))))
+        "a layer allowed itself in :allow")
+    (ok (signals (make '(:system "x") '(:layers (:a "a/")) '(:isolated :b))) "an unknown layer in :isolated")
+    (ok (signals (make '(:system "x") '(:layers (:a "a/")) '(:isolated :a :a))) "a layer twice in :isolated")
     (ok (signals (make '(:system "x") '(:layers (:a "")))) "an empty pattern")
     (ok (signals (make '(:system "x") '(:layers (:a "a/")) '(:ignore ""))) "an empty pattern in :ignore")
     (ok (signals (make '(:system "x") '(:layers (:a "a/")) '(:anywhere :lib))) "a name in :anywhere that is not a string")
