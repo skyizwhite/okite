@@ -138,8 +138,8 @@
   (:isolated layer ...)   layers whose files may not use one another.
   (:libraries (\"name\" layer ...) ...)
                           a system outside this one and the layers that may use
-                          it. The name covers its subsystems and extensions:
-                          \"lack\" covers lack/request and lack-middleware-session.
+                          it. The name covers its subsystems: \"lack\" covers
+                          lack/request, not lack-middleware-session.
   (:anywhere \"name\" ...)  libraries every layer may use, named as in :libraries.
                           A library none of :libraries, :anywhere and :forbid
                           names is a violation, and so is a name in :libraries
@@ -221,15 +221,14 @@ Directories whose name starts with a dot (.qlot, .git) are not walked."
 itself stands for its main file, the one package-inferred systems conventionally
 nickname it after."
   (let ((system (definition-system definition)))
-    (cond ((string= dependency system) "main")
-          ((prefix-p (format nil "~a/" system) dependency)
-           (subseq dependency (1+ (length system)))))))
+    (when (covers-p system dependency)
+      (if (string= dependency system)
+          "main"
+          (subseq dependency (1+ (length system)))))))
 
-(defun covers-p (name dependency separators)
+(defun covers-p (name dependency)
   (or (string= name dependency)
-      (and (< (length name) (length dependency))
-           (prefix-p name dependency)
-           (member (char dependency (length name)) separators))))
+      (prefix-p (format nil "~a/" name) dependency)))
 
 (defun library-layers (definition dependency)
   "The layers that may use DEPENDENCY, :anywhere, or NIL when neither :libraries
@@ -239,13 +238,13 @@ pattern does in :layers."
     (dolist (entry (append (definition-libraries definition)
                            (mapcar (lambda (name) (cons name :anywhere))
                                    (definition-anywhere definition))))
-      (when (and (covers-p (first entry) dependency '(#\/ #\-))
+      (when (and (covers-p (first entry) dependency)
                  (or (null best) (> (length (first entry)) (length (first best)))))
         (setf best entry)))
     (rest best)))
 
 (defun forbidden-p (definition dependency)
-  (some (lambda (name) (covers-p name dependency '(#\/)))
+  (some (lambda (name) (covers-p name dependency))
         (definition-forbid definition)))
 
 (defstruct (violation (:constructor make-violation
@@ -317,7 +316,7 @@ system as ASDF sees them now. Files are named as ASDF systems."
                              (push (make-violation :library name layer dependency homes) found))))))))))
     ;; :forbid is left out: a forbidden name that covers nothing is what it is for
     (dolist (library (library-names definition))
-      (unless (some (lambda (dependency) (covers-p library dependency '(#\/ #\-))) libraries)
+      (unless (some (lambda (dependency) (covers-p library dependency)) libraries)
         (push (make-violation :unused nil nil library) found)))
     (nreverse found)))
 

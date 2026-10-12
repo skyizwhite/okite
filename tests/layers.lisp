@@ -312,13 +312,13 @@
              "my-app")))
 
 (deftest what-a-name-covers
-  (let ((covers-p (lambda (name dependency separators)
-                    (okite/layers::covers-p name dependency separators))))
-    (ok (funcall covers-p "lack" "lack" '(#\/ #\-)))
-    (ok (funcall covers-p "lack" "lack/request" '(#\/ #\-)))
-    (ok (funcall covers-p "lack" "lack-middleware-session" '(#\/ #\-)) "a library covers its extensions")
-    (ng (funcall covers-p "lack" "lackey" '(#\/ #\-)))
-    (ng (funcall covers-p "koya" "koya-server" '(#\/)) "a forbidden name does not")))
+  (let ((covers-p (lambda (name dependency)
+                    (okite/layers::covers-p name dependency))))
+    (ok (funcall covers-p "somelib" "somelib"))
+    (ok (funcall covers-p "somelib" "somelib/extra"))
+    (ng (funcall covers-p "somelib" "somelibx"))
+    (ng (funcall covers-p "somelib" "somelib-extra") "a system whose name continues after a dash is another")
+    (ng (funcall covers-p "somelib/extra" "somelib/extra-more") "and so is a sibling subsystem")))
 
 (deftest a-definition-is-checked-when-it-is-made
   (flet ((make (&rest clauses) (okite/layers::make-definition 'bad clauses)))
