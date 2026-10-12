@@ -221,9 +221,10 @@ Directories whose name starts with a dot (.qlot, .git) are not walked."
 itself stands for its main file, the one package-inferred systems conventionally
 nickname it after."
   (let ((system (definition-system definition)))
-    (cond ((string= dependency system) "main")
-          ((prefix-p (format nil "~a/" system) dependency)
-           (subseq dependency (1+ (length system)))))))
+    (when (covers-p system dependency)
+      (if (string= dependency system)
+          "main"
+          (subseq dependency (1+ (length system)))))))
 
 (defun covers-p (name dependency)
   (or (string= name dependency)
